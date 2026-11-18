@@ -25,14 +25,14 @@ function rng(seed) {
 // Faste tilfældige tal sikrer stabile resultater, når indstillingerne ændres.
 const uniforms = (() => { const r = rng(20261118); return Array.from({length:REPS}, () => Array.from({length:120}, () => [r(), r()])); })();
 function calc(quota, effect, mode) {
-  const pool = mode === 'count' ? Math.round(80 * (1 + effect / 100)) : 80;
+  const pool = mode === 'profile' ? 80 : Math.round(80 * (1 + effect / 100));
   const slots = INTAKES.map(n => Math.floor(n * (1 - quota / 100) + 0.5));
   const columns = INTAKES.map(() => []);
   for (const draws of uniforms) {
     const values = [];
     for (let j = 0; j < pool; j++) {
       const [categoryDraw, profileDraw] = draws[j];
-      const source = mode === 'profile' && profileDraw < effect / 100 ? NATIONAL : BASE;
+      const source = mode === 'high' && j >= 80 ? [{lo:10,hi:12,w:1}] : mode === 'profile' && profileDraw < effect / 100 ? NATIONAL : BASE;
       values.push(quantile(source, categoryDraw));
     }
     values.sort((a,b) => b-a);
@@ -47,10 +47,12 @@ function calc(quota, effect, mode) {
 }
 function renderChart(base, scenario, selected) {
   const svg = $('chart'), w=720, h=345, left=46, right=18, top=13, bottom=40;
+  const shown = [...base.series, ...scenario.series].filter(d=>d.valid);
+  const maxY = Math.max(9, Math.ceil(Math.max(...shown.map(d=>d.high))));
   const x = n => left+(n-50)/50*(w-left-right);
-  const y = n => top+(9-n)/7*(h-top-bottom);
+  const y = n => top+(maxY-n)/(maxY-2)*(h-top-bottom);
   let s = '<title id="chart-title">Karaktergrænse ved forskellige optagsstørrelser</title><desc id="chart-desc">Median for scenario og grundmodel. Båndet viser et modelbaseret 90 procents interval. Kun optag med konkurrence om karakterpladser vises.</desc>';
-  for (let tick=2; tick<=9; tick++) s += `<line x1="${left}" y1="${y(tick)}" x2="${w-right}" y2="${y(tick)}" stroke="#e7ece8"/><text x="${left-14}" y="${y(tick)+4}" text-anchor="end" fill="#99a99f" font-size="11">${tick}</text>`;
+  for (let tick=2; tick<=maxY; tick++) s += `<line x1="${left}" y1="${y(tick)}" x2="${w-right}" y2="${y(tick)}" stroke="#e7ece8"/><text x="${left-14}" y="${y(tick)+4}" text-anchor="end" fill="#99a99f" font-size="11">${tick}</text>`;
   for (let tick=50; tick<=100; tick+=10) s += `<text x="${x(tick)}" y="${h-13}" text-anchor="middle" fill="#99a99f" font-size="11">${tick}</text>`;
   const val = scenario.series.filter(d=>d.valid), orig = base.series.filter(d=>d.valid);
   const coords = (data,key) => data.map(d=>`${x(d.n)},${y(d[key])}`).join(' ');
@@ -81,6 +83,21 @@ function update() {
   $('result-note').textContent=d.valid
     ? `Beregnet ud fra ${d.k} karakterpladser blandt ${scenario.pool} tænkte ansøgere. Kvote 2 antages at komme fra et særskilt felt.`
     : `Med ${d.k} karakterpladser og ${scenario.pool} tænkte ansøgere optages alle i modellen. ${Math.max(0,d.k-scenario.pool)} karakterpladser vil i så fald være ubesatte.`;
+  const baseline=base.series.find(z=>z.n===intake);
+  let explanation;
+  if (mode==='profile') {
+    const share=100*12/358+(27-100*12/358)*effect/100;
+    explanation=`Feltet er stadig 80. Andelen med mindst 10 er ${fmt(share)} % mod 3,4 % uden effekt; øvrige karaktergrupper følger samme indbyrdes fordeling.`;
+  } else if (mode==='high') {
+    explanation=`Der er ${scenario.pool-80} ekstra ansøgere med mindst 10 oven i de oprindelige 80. Procenten regnes af hele det oprindelige felt.`;
+  } else {
+    explanation=`Der er ${scenario.pool-80} ekstra ansøgere med samme karakterfordeling som i det oprindelige felt.`;
+  }
+  if (d.valid && baseline.valid) {
+    const difference=d.median-baseline.median;
+    explanation+=` Uden effekt: ${fmt(baseline.median)}. ${Math.abs(difference)<0.05 ? 'Ændringen er mindre end 0,05 karakterpoint.' : `Forskel før afrunding: ${difference>0?'+':''}${difference.toFixed(2).replace('.', ',')} karakterpoint.`}`;
+  }
+  $('effect-note').textContent=explanation;
   renderChart(base,scenario,intake);
 }
 let scheduled;
