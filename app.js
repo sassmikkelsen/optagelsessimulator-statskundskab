@@ -2,18 +2,21 @@
 
 // Alle effekter er scenarieantagelser. Ingen af fordelingerne er ansøgerdata.
 const BASE = [{lo:2,hi:4,w:4},{lo:4,hi:6,w:53},{lo:6,hi:8,w:188},{lo:8,hi:10,w:101},{lo:10,hi:12,w:12}];
-// Et tænkt referencefelt: 27 % på 10+, samme relative fordeling under 10.
-// Det er ikke den fulde nationale fordeling.
-const NATIONAL = [{lo:2,hi:4,w:4},{lo:4,hi:6,w:53},{lo:6,hi:8,w:188},{lo:8,hi:10,w:101},{lo:10,hi:12,w:346*0.27/0.73}];
+// Konstrueret national reference: 27 % >=10 og gennemsnit 8,8.
+// De fire lavere kategorier er vægtet opad ud fra Sambach-fordelingen.
+// To nationale nøgletal bestemmer ikke en hel fordeling.
+const NATIONAL = [{lo:2,hi:4,w:0.001042336},{lo:4,hi:6,w:0.034100986},{lo:6,hi:8,w:0.298670512},{lo:8,hi:10,w:0.396186166},{lo:10,hi:12,w:0.27}];
 const REPS = 3000;
 const INTAKES = Array.from({length:11}, (_, i) => 50 + i * 5);
 const $ = id => document.getElementById(id);
 const fmt = n => n.toFixed(1).replace('.', ',');
-const STORE_KEY = 'optagelsessimulator-scenario-v1';
+const STORE_KEY = 'optagelsessimulator-scenario-v2';
+const OLD_STORE_KEY = 'optagelsessimulator-scenario-v1';
+function hasOldSaved() { try { return !!localStorage.getItem(OLD_STORE_KEY); } catch { return false; } }
 function readSaved() {
   try {
     const s=JSON.parse(localStorage.getItem(STORE_KEY));
-    return s && INTAKES.includes(s.intake) && Number.isInteger(s.quota) && s.quota>=0 && s.quota<=50 && Number.isInteger(s.effect) && s.effect>=0 && s.effect<=50 && ['count','high','profile'].includes(s.mode) ? s : null;
+    return s && INTAKES.includes(s.intake) && Number.isInteger(s.quota) && s.quota>=0 && s.quota<=50 && Number.isInteger(s.effect) && s.effect>=0 && s.effect<=100 && Number.isInteger(s.applicants) && s.applicants>=40 && s.applicants<=240 ? s : null;
   } catch { return null; }
 }
 let savedScenario=readSaved();
@@ -31,16 +34,16 @@ function rng(seed) {
   return function() { seed |= 0; seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = (t + Math.imul(t ^ t >>> 7, 61 | t)) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
 }
 // Faste tilfældige tal sikrer stabile resultater, når indstillingerne ændres.
-const uniforms = (() => { const r = rng(20261118); return Array.from({length:REPS}, () => Array.from({length:120}, () => [r(), r()])); })();
-function calc(quota, effect, mode) {
-  const pool = mode === 'profile' ? 80 : Math.round(80 * (1 + effect / 100));
+const uniforms = (() => { const r = rng(20261118); return Array.from({length:REPS}, () => Array.from({length:240}, () => [r(), r()])); })();
+function calc(quota, effect, applicants) {
+  const pool = applicants;
   const slots = INTAKES.map(n => Math.floor(n * (1 - quota / 100) + 0.5));
   const columns = INTAKES.map(() => []);
   for (const draws of uniforms) {
     const values = [];
     for (let j = 0; j < pool; j++) {
       const [categoryDraw, profileDraw] = draws[j];
-      const source = mode === 'high' && j >= 80 ? [{lo:10,hi:12,w:1}] : mode === 'profile' && profileDraw < effect / 100 ? NATIONAL : BASE;
+      const source = profileDraw < effect / 100 ? NATIONAL : BASE;
       values.push(quantile(source, categoryDraw));
     }
     values.sort((a,b) => b-a);
@@ -81,12 +84,14 @@ function renderChart(base, scenario, selected, saved, savedIntake) {
   svg.innerHTML=s;
 }
 function update() {
-  const intake=+$('intake').value, quota=+$('quota').value, effect=+$('attraction').value;
-  const mode=document.querySelector('input[name="mode"]:checked').value;
+  const intake=+$('intake').value, quota=+$('quota').value, effect=+$('attraction').value, applicants=+$('applicants').value;
   $('intake-value').textContent=`${intake} studerende`;
   $('quota-value').textContent=`${quota} %`;
+  $('applicants-value').textContent=`${applicants} personer`;
+  const pct=(applicants/80-1)*100;
+  $('applicants-change').textContent=`${pct>0?'+':''}${fmt(pct)} % i forhold til 80 nuværende optagne. De 80 er ikke et kendt ansøgertal.`;
   $('attraction-value').textContent=`${effect} %`;
-  const base=calc(quota,0,'count'), scenario=effect===0?base:calc(quota,effect,mode);
+  const base=calc(quota,0,applicants), scenario=effect===0?base:calc(quota,effect,applicants);
   const d=scenario.series.find(z=>z.n===intake);
   $('places').textContent=d.k;
   $('pool').textContent=scenario.pool;
@@ -98,15 +103,10 @@ function update() {
     ? `Beregnet ud fra ${d.k} karakterpladser blandt ${scenario.pool} tænkte ansøgere. Kvote 2 antages at komme fra et særskilt felt.`
     : `Med ${d.k} karakterpladser og ${scenario.pool} tænkte ansøgere optages alle i modellen. ${Math.max(0,d.k-scenario.pool)} karakterpladser vil i så fald være ubesatte.`;
   const baseline=base.series.find(z=>z.n===intake);
-  let explanation;
-  if (mode==='profile') {
-    const share=100*12/358+(27-100*12/358)*effect/100;
-    explanation=`Feltet er stadig 80. Andelen med mindst 10 er ${fmt(share)} % mod 3,4 % uden effekt; øvrige karaktergrupper følger samme indbyrdes fordeling.`;
-  } else if (mode==='high') {
-    explanation=`Der er ${scenario.pool-80} ekstra ansøgere med mindst 10 oven i de oprindelige 80. Procenten regnes af hele det oprindelige felt.`;
-  } else {
-    explanation=`Der er ${scenario.pool-80} ekstra ansøgere med samme karakterfordeling som i det oprindelige felt.`;
-  }
+  const share=100*12/358+(27-100*12/358)*effect/100;
+  const baseMean=(4*3+53*5+188*7+101*9+12*11)/358;
+  const mean=baseMean+(8.8-baseMean)*effect/100;
+  let explanation=`Feltet er ${applicants} uanset tiltrækningseffekt. Med ${effect} % effekt er den tænkte ansøgerprofils gennemsnit ${fmt(mean)} og andelen med mindst 10 ${fmt(share)} %.`;
   if (d.valid && baseline.valid) {
     const difference=d.median-baseline.median;
     explanation+=` Uden effekt: ${fmt(baseline.median)}. ${Math.abs(difference)<0.05 ? 'Ændringen er mindre end 0,05 karakterpoint.' : `Forskel før afrunding: ${difference>0?'+':''}${difference.toFixed(2).replace('.', ',')} karakterpoint.`}`;
@@ -114,11 +114,10 @@ function update() {
   $('effect-note').textContent=explanation;
   let saved=null;
   if (savedScenario) {
-    saved=calc(savedScenario.quota,savedScenario.effect,savedScenario.mode);
+    saved=calc(savedScenario.quota,savedScenario.effect,savedScenario.applicants);
     const sd=saved.series.find(z=>z.n===savedScenario.intake);
-    const modes={count:'flere med samme profil',high:'flere med mindst 10',profile:'større andel med mindst 10'};
-    $('saved-description').textContent=`Gemt: ${savedScenario.intake} optagne, ${savedScenario.quota} % kvote 2, ${savedScenario.effect} % tiltrækning (${modes[savedScenario.mode]}). Grænse: ${sd.valid?fmt(sd.median):'alle optages'}.`;
-  } else $('saved-description').textContent='Gem de aktuelle indstillinger, og prøv derefter et andet scenario. Det gemte vises i grafen.';
+    $('saved-description').textContent=`Gemt: ${savedScenario.intake} optagne, ${savedScenario.applicants} ansøgere, ${savedScenario.quota} % kvote 2, ${savedScenario.effect} % tiltrækning. Grænse: ${sd.valid?fmt(sd.median):'alle optages'}.`;
+  } else $('saved-description').textContent=hasOldSaved()?'Et scenario fra den tidligere model er bevaret i browseren, men kan ikke sammenlignes direkte med den nye model. Gem et nyt scenario her.':'Gem de aktuelle indstillinger, og prøv derefter et andet scenario. Det gemte vises i grafen.';
   $('save-scenario').textContent=savedScenario?'Overskriv gemt scenario':'Gem scenario';
   $('clear-scenario').hidden=!savedScenario;
   $('saved-key').hidden=!savedScenario;
@@ -127,9 +126,9 @@ function update() {
 }
 let scheduled;
 document.querySelectorAll('input').forEach(el=>el.addEventListener('input',()=>{cancelAnimationFrame(scheduled);scheduled=requestAnimationFrame(update);}));
-$('reset').addEventListener('click',()=>{$('intake').value=80;$('quota').value=15;$('attraction').value=5;document.querySelector('input[name="mode"][value="count"]').checked=true;update();});
+$('reset').addEventListener('click',()=>{$('intake').value=80;$('quota').value=15;$('applicants').value=100;$('attraction').value=5;update();});
 $('save-scenario').addEventListener('click',()=>{
-  savedScenario={intake:+$('intake').value,quota:+$('quota').value,effect:+$('attraction').value,mode:document.querySelector('input[name="mode"]:checked').value};
+  savedScenario={intake:+$('intake').value,quota:+$('quota').value,effect:+$('attraction').value,applicants:+$('applicants').value};
   try { localStorage.setItem(STORE_KEY,JSON.stringify(savedScenario)); } catch { /* Scenariet kan stadig sammenlignes i denne fane. */ }
   update();
 });
