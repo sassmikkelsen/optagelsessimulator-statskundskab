@@ -4,3 +4,5 @@
 fieldset{min-width:0} legend{float:none;width:auto;padding:0 8px 0 0}.choice{clear:both;width:100%}
 
 .effect-note{font-size:12px;line-height:1.55;color:#375f4c;background:#f2f7ed;border-left:3px solid #b8cf7c;padding:10px 13px;margin:-10px 0 23px}
+
+[hidden]{display:none!important}.comparison{display:flex;align-items:center;justify-content:space-between;gap:16px;background:#f4f7fb;border:1px solid #e0e8f2;padding:14px 16px;margin:0 0 24px}.comparison strong{font-size:12px;color:#324c68}.comparison p{font-size:11px;line-height:1.5;color:#718297;margin:5px 0 0}.comparison-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}.comparison button{border:1px solid #5278a3;border-radius:4px;background:#5278a3;color:white;font:700 11px var(--sans);padding:9px 12px;cursor:pointer}.comparison button#clear-scenario{background:transparent;color:#5278a3}.legend-saved{width:19px;height:0;border-top:3px solid #4f72a5;margin-left:10px}@media(max-width:550px){.comparison{align-items:flex-start;flex-direction:column}.chart-legend{flex-wrap:wrap}}

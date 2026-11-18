@@ -2,6 +2,8 @@
 
 En statisk, browserbaseret scenariemodel til at undersøge mulig adgangsgrænse på en tænkt statskundskabsuddannelse. Åbn `index.html` eller udgiv mappen med GitHub Pages. Ingen data sendes til en server. Skrifttyper forsøges hentet fra Google Fonts; lokale reservefonte bruges ellers.
 
+Et scenario kan gemmes som sammenligningskurve. Det gemmes i browserens lokale lager, når det er tilgængeligt, og kan overskrives eller fjernes. Nulstilling af de aktuelle indstillinger fjerner ikke det gemte scenario.
+
 ## Antagelser
 
 - De oplyste 358 optagne fordelt på 4/53/188/101/12 i karakterintervallerne 2–4/4–6/6–8/8–10/10–12 bruges som tilnærmet fordeling. Uniform fordeling antages inden for hvert interval. Andelen i 10+ antages ligge mellem 10 og 12.

@@ -9,6 +9,14 @@ const REPS = 3000;
 const INTAKES = Array.from({length:11}, (_, i) => 50 + i * 5);
 const $ = id => document.getElementById(id);
 const fmt = n => n.toFixed(1).replace('.', ',');
+const STORE_KEY = 'optagelsessimulator-scenario-v1';
+function readSaved() {
+  try {
+    const s=JSON.parse(localStorage.getItem(STORE_KEY));
+    return s && INTAKES.includes(s.intake) && Number.isInteger(s.quota) && s.quota>=0 && s.quota<=50 && Number.isInteger(s.effect) && s.effect>=0 && s.effect<=50 && ['count','high','profile'].includes(s.mode) ? s : null;
+  } catch { return null; }
+}
+let savedScenario=readSaved();
 
 function quantile(distribution, u) {
   const total = distribution.reduce((sum, bin) => sum + bin.w, 0);
@@ -45,13 +53,13 @@ function calc(quota, effect, mode) {
   });
   return {pool, series};
 }
-function renderChart(base, scenario, selected) {
+function renderChart(base, scenario, selected, saved, savedIntake) {
   const svg = $('chart'), w=720, h=345, left=46, right=18, top=13, bottom=40;
-  const shown = [...base.series, ...scenario.series].filter(d=>d.valid);
+  const shown = [...base.series, ...scenario.series, ...(saved?saved.series:[])].filter(d=>d.valid);
   const maxY = Math.max(9, Math.ceil(Math.max(...shown.map(d=>d.high))));
   const x = n => left+(n-50)/50*(w-left-right);
   const y = n => top+(maxY-n)/(maxY-2)*(h-top-bottom);
-  let s = '<title id="chart-title">Karaktergrænse ved forskellige optagsstørrelser</title><desc id="chart-desc">Median for scenario og grundmodel. Båndet viser et modelbaseret 90 procents interval. Kun optag med konkurrence om karakterpladser vises.</desc>';
+  let s = '<title id="chart-title">Karaktergrænse ved forskellige optagsstørrelser</title><desc id="chart-desc">Median for aktuelt og eventuelt gemt scenario samt grundmodel. Båndet viser et modelbaseret 90 procents interval for det aktuelle scenario. Kun optag med konkurrence om karakterpladser vises.</desc>';
   for (let tick=2; tick<=maxY; tick++) s += `<line x1="${left}" y1="${y(tick)}" x2="${w-right}" y2="${y(tick)}" stroke="#e7ece8"/><text x="${left-14}" y="${y(tick)+4}" text-anchor="end" fill="#99a99f" font-size="11">${tick}</text>`;
   for (let tick=50; tick<=100; tick+=10) s += `<text x="${x(tick)}" y="${h-13}" text-anchor="middle" fill="#99a99f" font-size="11">${tick}</text>`;
   const val = scenario.series.filter(d=>d.valid), orig = base.series.filter(d=>d.valid);
@@ -61,6 +69,12 @@ function renderChart(base, scenario, selected) {
     s += `<polygon points="${poly}" fill="#e6815e" opacity="0.13"/>`;
   }
   if (orig.length>1) s += `<polyline points="${coords(orig,'median')}" fill="none" stroke="#afc0b6" stroke-width="2.4" stroke-dasharray="6 5"/>`;
+  if (saved) {
+    const savedValues=saved.series.filter(d=>d.valid);
+    if (savedValues.length>1) s += `<polyline points="${coords(savedValues,'median')}" fill="none" stroke="#4f72a5" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>`;
+    const point=savedValues.find(d=>d.n===savedIntake);
+    if (point) s += `<circle cx="${x(point.n)}" cy="${y(point.median)}" r="5.5" fill="#4f72a5" stroke="white" stroke-width="2"/>`;
+  }
   if (val.length>1) s += `<polyline points="${coords(val,'median')}" fill="none" stroke="#dc7954" stroke-width="3.4" stroke-linejoin="round" stroke-linecap="round"/>`;
   for (const d of val) s += `<circle cx="${x(d.n)}" cy="${y(d.median)}" r="${d.n===selected?5.5:3}" fill="${d.n===selected?'#dc7954':'white'}" stroke="#dc7954" stroke-width="2"/>`;
   if (!val.length) s += `<text x="${w/2}" y="${h/2}" text-anchor="middle" fill="#6b8173" font-size="14">Ingen konkurrence om karakterpladserne</text>`;
@@ -98,9 +112,30 @@ function update() {
     explanation+=` Uden effekt: ${fmt(baseline.median)}. ${Math.abs(difference)<0.05 ? 'Ændringen er mindre end 0,05 karakterpoint.' : `Forskel før afrunding: ${difference>0?'+':''}${difference.toFixed(2).replace('.', ',')} karakterpoint.`}`;
   }
   $('effect-note').textContent=explanation;
-  renderChart(base,scenario,intake);
+  let saved=null;
+  if (savedScenario) {
+    saved=calc(savedScenario.quota,savedScenario.effect,savedScenario.mode);
+    const sd=saved.series.find(z=>z.n===savedScenario.intake);
+    const modes={count:'flere med samme profil',high:'flere med mindst 10',profile:'større andel med mindst 10'};
+    $('saved-description').textContent=`Gemt: ${savedScenario.intake} optagne, ${savedScenario.quota} % kvote 2, ${savedScenario.effect} % tiltrækning (${modes[savedScenario.mode]}). Grænse: ${sd.valid?fmt(sd.median):'alle optages'}.`;
+  } else $('saved-description').textContent='Gem de aktuelle indstillinger, og prøv derefter et andet scenario. Det gemte vises i grafen.';
+  $('save-scenario').textContent=savedScenario?'Overskriv gemt scenario':'Gem scenario';
+  $('clear-scenario').hidden=!savedScenario;
+  $('saved-key').hidden=!savedScenario;
+  $('saved-key-label').hidden=!savedScenario;
+  renderChart(base,scenario,intake,saved,savedScenario?.intake);
 }
 let scheduled;
 document.querySelectorAll('input').forEach(el=>el.addEventListener('input',()=>{cancelAnimationFrame(scheduled);scheduled=requestAnimationFrame(update);}));
 $('reset').addEventListener('click',()=>{$('intake').value=80;$('quota').value=15;$('attraction').value=5;document.querySelector('input[name="mode"][value="count"]').checked=true;update();});
+$('save-scenario').addEventListener('click',()=>{
+  savedScenario={intake:+$('intake').value,quota:+$('quota').value,effect:+$('attraction').value,mode:document.querySelector('input[name="mode"]:checked').value};
+  try { localStorage.setItem(STORE_KEY,JSON.stringify(savedScenario)); } catch { /* Scenariet kan stadig sammenlignes i denne fane. */ }
+  update();
+});
+$('clear-scenario').addEventListener('click',()=>{
+  savedScenario=null;
+  try { localStorage.removeItem(STORE_KEY); } catch { /* Ingen lokal lagring tilgængelig. */ }
+  update();
+});
 update();
